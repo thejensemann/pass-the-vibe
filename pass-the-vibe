@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# pass-the-vibe - Auto-document your Claude Code sessions per git branch
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VIBE_DIR=".vibe"
+CLAUDE_SETTINGS=".claude/settings.local.json"
+
+usage() {
+    cat <<EOF
+pass-the-vibe - Auto-document Claude Code sessions per git branch
+
+Usage:
+    pass-the-vibe init     Initialize pass-the-vibe in current git repository
+    pass-the-vibe status   Check if pass-the-vibe is configured
+    pass-the-vibe help     Show this help message
+
+After initialization, all Claude Code prompts and responses will be
+automatically logged to .vibe/<date>_<branch>.md files.
+EOF
+}
+
+check_git_repo() {
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "Error: Not a git repository. Please run this inside a git repo."
+        exit 1
+    fi
+}
+
+init() {
+    check_git_repo
+
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
+
+    echo "Initializing pass-the-vibe in: $repo_root"
+
+    # Create .vibe directory
+    mkdir -p "$repo_root/$VIBE_DIR"
+    echo "Created $VIBE_DIR/ directory"
+
+    # Create .claude directory if needed
+    mkdir -p "$repo_root/.claude"
+
+    # Copy hook scripts to .vibe
+    cp "$SCRIPT_DIR/hooks/on-prompt.sh" "$repo_root/$VIBE_DIR/"
+    cp "$SCRIPT_DIR/hooks/on-stop.sh" "$repo_root/$VIBE_DIR/"
+    chmod +x "$repo_root/$VIBE_DIR/on-prompt.sh"
+    chmod +x "$repo_root/$VIBE_DIR/on-stop.sh"
+    echo "Installed hook scripts to $VIBE_DIR/"
+
+    # Create or update Claude settings
+    local hooks_config
+    hooks_config=$(cat <<'HOOKS_JSON'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".vibe/on-prompt.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".vibe/on-stop.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKS_JSON
+)
+
+    if [[ -f "$repo_root/$CLAUDE_SETTINGS" ]]; then
+        # Merge with existing settings using jq if available
+        if command -v jq &> /dev/null; then
+            local existing
+            existing=$(cat "$repo_root/$CLAUDE_SETTINGS")
+            echo "$existing" | jq --argjson new "$hooks_config" '. * $new' > "$repo_root/$CLAUDE_SETTINGS"
+            echo "Merged hooks into existing $CLAUDE_SETTINGS"
+        else
+            echo "Warning: jq not installed. Please manually merge hooks config."
+            echo "Hooks config saved to $repo_root/$VIBE_DIR/hooks-config.json"
+            echo "$hooks_config" > "$repo_root/$VIBE_DIR/hooks-config.json"
+        fi
+    else
+        echo "$hooks_config" > "$repo_root/$CLAUDE_SETTINGS"
+        echo "Created $CLAUDE_SETTINGS with hooks configuration"
+    fi
+
+    # Add .vibe to .gitignore patterns that shouldn't be tracked (temp files)
+    if [[ -f "$repo_root/.gitignore" ]]; then
+        if ! grep -q "^\.vibe/\.tmp" "$repo_root/.gitignore" 2>/dev/null; then
+            echo ".vibe/.tmp*" >> "$repo_root/.gitignore"
+        fi
+    fi
+
+    echo ""
+    echo "pass-the-vibe initialized successfully!"
+    echo ""
+    echo "Your Claude Code sessions will now be logged to:"
+    echo "  $VIBE_DIR/<date>_<branch>.md"
+    echo ""
+    echo "These files are meant to be committed with your code changes."
+}
+
+status() {
+    check_git_repo
+
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
+
+    if [[ -d "$repo_root/$VIBE_DIR" ]] && [[ -f "$repo_root/$CLAUDE_SETTINGS" ]]; then
+        echo "pass-the-vibe is configured in this repository"
+        echo ""
+        echo "Vibe logs:"
+        if ls "$repo_root/$VIBE_DIR"/*.md 1> /dev/null 2>&1; then
+            ls -la "$repo_root/$VIBE_DIR"/*.md
+        else
+            echo "  No logs yet"
+        fi
+    else
+        echo "pass-the-vibe is not configured in this repository"
+        echo "Run 'pass-the-vibe init' to set it up"
+    fi
+}
+
+case "${1:-help}" in
+    init)
+        init
+        ;;
+    status)
+        status
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        usage
+        exit 1
+        ;;
+esac
