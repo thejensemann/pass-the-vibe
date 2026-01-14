@@ -239,7 +239,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": "pass-the-vibe _hook on-prompt"
+            "command": "command -v pass-the-vibe >/dev/null && pass-the-vibe _hook on-prompt"
           }
         ]
       }
@@ -250,7 +250,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": "pass-the-vibe _hook on-stop"
+            "command": "command -v pass-the-vibe >/dev/null && pass-the-vibe _hook on-stop"
           }
         ]
       }
