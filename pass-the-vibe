@@ -33,6 +33,152 @@ check_git_repo() {
     fi
 }
 
+# Internal hook commands (called by Claude Code hooks)
+hook_on_prompt() {
+    # Get repo root for absolute paths
+    local REPO_ROOT
+    REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    local VIBE_DIR="$REPO_ROOT/.vibe"
+
+    # Read JSON input from stdin
+    local input
+    input=$(cat)
+
+    # Extract prompt from input
+    local prompt
+    prompt=$(echo "$input" | jq -r '.prompt // .user_prompt // empty' 2>/dev/null || echo "")
+
+    if [[ -z "$prompt" ]]; then
+        exit 0
+    fi
+
+    # Get current git branch (sanitize for filename)
+    local branch branch_safe
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    branch_safe=$(echo "$branch" | tr '/' '-' | tr ' ' '-')
+
+    # Get current date
+    local date_prefix
+    date_prefix=$(date +%Y-%m-%d)
+
+    # Build filename
+    local log_file="$VIBE_DIR/${date_prefix}_${branch_safe}.md"
+
+    # Create vibe directory if it doesn't exist
+    mkdir -p "$VIBE_DIR"
+
+    # Initialize file with header if it doesn't exist
+    if [[ ! -f "$log_file" ]]; then
+        {
+            echo "# Vibe Log: $branch"
+            echo ""
+            echo "Date: $date_prefix"
+            echo ""
+            echo "---"
+            echo ""
+        } > "$log_file"
+    fi
+
+    # Get timestamp
+    local timestamp
+    timestamp=$(date +%H:%M:%S)
+
+    # Append user prompt
+    {
+        echo "## [$timestamp] User"
+        echo ""
+        echo "$prompt"
+        echo ""
+    } >> "$log_file"
+
+    # Store temp file reference for the stop hook
+    echo "$log_file" > "$VIBE_DIR/.tmp_current_log"
+
+    exit 0
+}
+
+hook_on_stop() {
+    # Get repo root for absolute paths
+    local REPO_ROOT
+    REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    local VIBE_DIR="$REPO_ROOT/.vibe"
+
+    # Read JSON input from stdin
+    local input
+    input=$(cat)
+
+    # Get the transcript path from the input
+    local transcript_path
+    transcript_path=$(echo "$input" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
+
+    # Get current log file from temp reference
+    if [[ ! -f "$VIBE_DIR/.tmp_current_log" ]]; then
+        exit 0
+    fi
+
+    local log_file
+    log_file=$(cat "$VIBE_DIR/.tmp_current_log")
+
+    if [[ -z "$log_file" ]] || [[ ! -f "$log_file" ]]; then
+        exit 0
+    fi
+
+    # Get timestamp
+    local timestamp
+    timestamp=$(date +%H:%M:%S)
+
+    # Extract Claude's last response from transcript if available
+    local response=""
+    if [[ -n "$transcript_path" ]] && [[ -f "$transcript_path" ]]; then
+        response=$(tail -100 "$transcript_path" 2>/dev/null | \
+            jq -r 'select(.role == "assistant") | .content // empty' 2>/dev/null | \
+            tail -1 || echo "")
+    fi
+
+    # If we couldn't extract response, note that
+    if [[ -z "$response" ]]; then
+        response="*(Response logged - see conversation for details)*"
+    fi
+
+    # Append Claude's response
+    {
+        echo "## [$timestamp] Claude"
+        echo ""
+        echo "$response"
+        echo ""
+        echo "---"
+        echo ""
+    } >> "$log_file"
+
+    # Clean up temp file
+    rm -f "$VIBE_DIR/.tmp_current_log"
+
+    # Check if auto-commit is enabled
+    local AUTO_COMMIT="false"
+    if [[ -f "$VIBE_DIR/config" ]]; then
+        AUTO_COMMIT=$(grep "^AUTO_COMMIT=" "$VIBE_DIR/config" 2>/dev/null | cut -d= -f2 || echo "false")
+    fi
+
+    if [[ "$AUTO_COMMIT" == "true" ]]; then
+        cd "$REPO_ROOT"
+
+        # Check if there are any changes to commit
+        if ! git diff --quiet HEAD 2>/dev/null || [[ -n $(git ls-files --others --exclude-standard) ]]; then
+            local branch commit_timestamp
+            branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+            commit_timestamp=$(date +"%Y-%m-%d %H:%M")
+
+            git add -A
+            git commit -m "Claude Code changes on $branch
+
+Auto-committed by pass-the-vibe at $commit_timestamp
+See .vibe/ for session documentation" 2>/dev/null || true
+        fi
+    fi
+
+    exit 0
+}
+
 write_config() {
     local repo_root="$1"
     local auto_commit="${2:-false}"
@@ -78,16 +224,10 @@ init() {
     # Create .claude directory if needed
     mkdir -p "$repo_root/.claude"
 
-    # Copy hook scripts to .vibe
-    cp "$SCRIPT_DIR/hooks/on-prompt.sh" "$repo_root/$VIBE_DIR/"
-    cp "$SCRIPT_DIR/hooks/on-stop.sh" "$repo_root/$VIBE_DIR/"
-    chmod +x "$repo_root/$VIBE_DIR/on-prompt.sh"
-    chmod +x "$repo_root/$VIBE_DIR/on-stop.sh"
-    echo "Installed hook scripts to $VIBE_DIR/"
-
-    # Create or update Claude settings (use absolute paths for reliability)
+    # Create Claude settings with portable command references
+    # Uses 'pass-the-vibe' command which should be in PATH
     local hooks_config
-    hooks_config=$(cat <<HOOKS_JSON
+    hooks_config=$(cat <<'HOOKS_JSON'
 {
   "hooks": {
     "UserPromptSubmit": [
@@ -96,7 +236,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": "$repo_root/$VIBE_DIR/on-prompt.sh"
+            "command": "pass-the-vibe _hook on-prompt"
           }
         ]
       }
@@ -107,7 +247,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": "$repo_root/$VIBE_DIR/on-stop.sh"
+            "command": "pass-the-vibe _hook on-stop"
           }
         ]
       }
@@ -147,7 +287,8 @@ HOOKS_JSON
     echo "Your Claude Code sessions will now be logged to:"
     echo "  $VIBE_DIR/<date>_<branch>.md"
     echo ""
-    echo "These files are meant to be committed with your code changes."
+    echo "The .claude/settings.local.json can be committed - it uses portable paths."
+    echo "Teammates need pass-the-vibe in their PATH to use the hooks."
 }
 
 config() {
@@ -234,6 +375,21 @@ case "$cmd" in
         ;;
     status)
         status
+        ;;
+    _hook)
+        # Internal hook commands - not shown in help
+        case "${1:-}" in
+            on-prompt)
+                hook_on_prompt
+                ;;
+            on-stop)
+                hook_on_stop
+                ;;
+            *)
+                echo "Unknown hook: ${1:-}"
+                exit 1
+                ;;
+        esac
         ;;
     help|--help|-h)
         usage

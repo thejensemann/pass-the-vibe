@@ -40,9 +40,11 @@ pass-the-vibe init
 ```
 
 This will:
-1. Create a `.vibe/` directory for logs
-2. Install hook scripts
-3. Configure Claude Code hooks in `.claude/settings.local.json`
+1. Create a `.vibe/` directory for logs and config
+2. Configure Claude Code hooks in `.claude/settings.local.json`
+
+The settings file uses portable commands (`pass-the-vibe _hook ...`) so it can be
+committed and shared with your team. Teammates just need `pass-the-vibe` in their PATH.
 
 ### Enable auto-commit (optional)
 
