@@ -130,9 +130,12 @@ hook_on_stop() {
     # Extract Claude's last response from transcript if available
     local response=""
     if [[ -n "$transcript_path" ]] && [[ -f "$transcript_path" ]]; then
-        response=$(tail -100 "$transcript_path" 2>/dev/null | \
-            jq -r 'select(.role == "assistant") | .content // empty' 2>/dev/null | \
-            tail -1 || echo "")
+        # Get the last assistant message and extract text content blocks
+        # The transcript format has: .message.content[] with {type, text} blocks
+        response=$(tail -200 "$transcript_path" 2>/dev/null | \
+            grep '"type":"assistant"' | \
+            tail -1 | \
+            jq -r '[.message.content[] | select(.type == "text") | .text] | join("\n\n")' 2>/dev/null || echo "")
     fi
 
     # If we couldn't extract response, note that
