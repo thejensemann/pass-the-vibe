@@ -13,9 +13,13 @@ usage() {
 pass-the-vibe - Auto-document Claude Code sessions per git branch
 
 Usage:
-    pass-the-vibe init     Initialize pass-the-vibe in current git repository
-    pass-the-vibe status   Check if pass-the-vibe is configured
-    pass-the-vibe help     Show this help message
+    pass-the-vibe init [--auto-commit]   Initialize in current git repository
+    pass-the-vibe config [--auto-commit] Update configuration
+    pass-the-vibe status                 Check if pass-the-vibe is configured
+    pass-the-vibe help                   Show this help message
+
+Options:
+    --auto-commit    Automatically commit changes when Claude finishes
 
 After initialization, all Claude Code prompts and responses will be
 automatically logged to .vibe/<date>_<branch>.md files.
@@ -29,17 +33,47 @@ check_git_repo() {
     fi
 }
 
+write_config() {
+    local repo_root="$1"
+    local auto_commit="${2:-false}"
+
+    cat > "$repo_root/$VIBE_DIR/config" <<EOF
+# pass-the-vibe configuration
+AUTO_COMMIT=$auto_commit
+EOF
+}
+
 init() {
     check_git_repo
 
-    local repo_root
+    local repo_root auto_commit="false"
     repo_root="$(git rev-parse --show-toplevel)"
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --auto-commit)
+                auto_commit="true"
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
 
     echo "Initializing pass-the-vibe in: $repo_root"
 
     # Create .vibe directory
     mkdir -p "$repo_root/$VIBE_DIR"
     echo "Created $VIBE_DIR/ directory"
+
+    # Write config
+    write_config "$repo_root" "$auto_commit"
+    if [[ "$auto_commit" == "true" ]]; then
+        echo "Auto-commit enabled"
+    fi
 
     # Create .claude directory if needed
     mkdir -p "$repo_root/.claude"
@@ -116,6 +150,49 @@ HOOKS_JSON
     echo "These files are meant to be committed with your code changes."
 }
 
+config() {
+    check_git_repo
+
+    local repo_root auto_commit=""
+    repo_root="$(git rev-parse --show-toplevel)"
+
+    if [[ ! -d "$repo_root/$VIBE_DIR" ]]; then
+        echo "Error: pass-the-vibe not initialized. Run 'pass-the-vibe init' first."
+        exit 1
+    fi
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --auto-commit)
+                auto_commit="true"
+                shift
+                ;;
+            --no-auto-commit)
+                auto_commit="false"
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -n "$auto_commit" ]]; then
+        write_config "$repo_root" "$auto_commit"
+        echo "Configuration updated: AUTO_COMMIT=$auto_commit"
+    else
+        # Show current config
+        if [[ -f "$repo_root/$VIBE_DIR/config" ]]; then
+            echo "Current configuration:"
+            cat "$repo_root/$VIBE_DIR/config"
+        else
+            echo "No configuration file found"
+        fi
+    fi
+}
+
 status() {
     check_git_repo
 
@@ -125,6 +202,14 @@ status() {
     if [[ -d "$repo_root/$VIBE_DIR" ]] && [[ -f "$repo_root/$CLAUDE_SETTINGS" ]]; then
         echo "pass-the-vibe is configured in this repository"
         echo ""
+
+        # Show config
+        if [[ -f "$repo_root/$VIBE_DIR/config" ]]; then
+            echo "Settings:"
+            grep -v "^#" "$repo_root/$VIBE_DIR/config" | grep -v "^$" | sed 's/^/  /'
+            echo ""
+        fi
+
         echo "Vibe logs:"
         if ls "$repo_root/$VIBE_DIR"/*.md 1> /dev/null 2>&1; then
             ls -la "$repo_root/$VIBE_DIR"/*.md
@@ -137,9 +222,15 @@ status() {
     fi
 }
 
-case "${1:-help}" in
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
     init)
-        init
+        init "$@"
+        ;;
+    config)
+        config "$@"
         ;;
     status)
         status
@@ -148,7 +239,7 @@ case "${1:-help}" in
         usage
         ;;
     *)
-        echo "Unknown command: $1"
+        echo "Unknown command: $cmd"
         usage
         exit 1
         ;;

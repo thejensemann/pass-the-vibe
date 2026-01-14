@@ -7,7 +7,7 @@ Auto-document your Claude Code sessions per git branch.
 - Maintains markdown files per git branch in a `.vibe/` directory
 - Files are named with date prefix and branch name: `2025-01-14_feature-xyz.md`
 - Automatically logs user prompts and Claude's responses
-- Documentation is committed together with your code changes
+- Optional auto-commit: automatically commit changes when Claude finishes
 - Single command initialization, no manual action needed afterward
 
 ## Installation
@@ -43,6 +43,21 @@ This will:
 1. Create a `.vibe/` directory for logs
 2. Install hook scripts
 3. Configure Claude Code hooks in `.claude/settings.local.json`
+
+### Enable auto-commit (optional)
+
+Automatically commit all changes when Claude finishes:
+
+```bash
+# During init
+pass-the-vibe init --auto-commit
+
+# Or enable later
+pass-the-vibe config --auto-commit
+
+# Disable auto-commit
+pass-the-vibe config --no-auto-commit
+```
 
 ### Check status
 

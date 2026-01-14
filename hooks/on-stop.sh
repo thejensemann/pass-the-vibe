@@ -56,5 +56,31 @@ fi
 # Clean up temp file
 rm -f "$VIBE_DIR/.tmp_current_log"
 
+# Check if auto-commit is enabled
+AUTO_COMMIT="false"
+if [[ -f "$VIBE_DIR/config" ]]; then
+    AUTO_COMMIT=$(grep "^AUTO_COMMIT=" "$VIBE_DIR/config" 2>/dev/null | cut -d= -f2 || echo "false")
+fi
+
+if [[ "$AUTO_COMMIT" == "true" ]]; then
+    cd "$REPO_ROOT"
+
+    # Check if there are any changes to commit
+    if ! git diff --quiet HEAD 2>/dev/null || [[ -n $(git ls-files --others --exclude-standard) ]]; then
+        # Get branch name for commit message
+        branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        timestamp=$(date +"%Y-%m-%d %H:%M")
+
+        # Stage all changes
+        git add -A
+
+        # Create commit with vibe log reference
+        git commit -m "Claude Code changes on $branch
+
+Auto-committed by pass-the-vibe at $timestamp
+See .vibe/ for session documentation" 2>/dev/null || true
+    fi
+fi
+
 # Exit 0 - don't block
 exit 0
