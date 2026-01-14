@@ -5,7 +5,9 @@
 #
 set -euo pipefail
 
-VIBE_DIR=".vibe"
+# Get repo root for absolute paths
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+VIBE_DIR="$REPO_ROOT/.vibe"
 
 # Read JSON input from stdin
 input=$(cat)

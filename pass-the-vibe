@@ -51,9 +51,9 @@ init() {
     chmod +x "$repo_root/$VIBE_DIR/on-stop.sh"
     echo "Installed hook scripts to $VIBE_DIR/"
 
-    # Create or update Claude settings
+    # Create or update Claude settings (use absolute paths for reliability)
     local hooks_config
-    hooks_config=$(cat <<'HOOKS_JSON'
+    hooks_config=$(cat <<HOOKS_JSON
 {
   "hooks": {
     "UserPromptSubmit": [
@@ -62,7 +62,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": ".vibe/on-prompt.sh"
+            "command": "$repo_root/$VIBE_DIR/on-prompt.sh"
           }
         ]
       }
@@ -73,7 +73,7 @@ init() {
         "hooks": [
           {
             "type": "command",
-            "command": ".vibe/on-stop.sh"
+            "command": "$repo_root/$VIBE_DIR/on-stop.sh"
           }
         ]
       }
