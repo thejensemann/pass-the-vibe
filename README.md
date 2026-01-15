@@ -1,3 +1,5 @@
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/95b8a124-8f55-401e-964f-d5b48a61b3c1" />
+
 # pass-the-vibe
 
 Auto-document your Claude Code sessions per git branch.
