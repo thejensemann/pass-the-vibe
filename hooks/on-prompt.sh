@@ -23,11 +23,35 @@ fi
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 branch_safe=$(echo "$branch" | tr '/' '-' | tr ' ' '-')
 
-# Get current date
-date_prefix=$(date +%Y-%m-%d)
+# Check if a log file already exists for this branch
+existing_file=$(find "$VIBE_DIR" -maxdepth 1 -name "*_${branch_safe}.md" 2>/dev/null | head -1)
 
-# Build filename
-log_file="$VIBE_DIR/${date_prefix}_${branch_safe}.md"
+if [[ -n "$existing_file" ]]; then
+    # Use existing file
+    log_file="$existing_file"
+else
+    # Get branch creation date (date of first commit on this branch vs main/master)
+    main_branch="main"
+    if ! git rev-parse --verify "$main_branch" &>/dev/null; then
+        main_branch="master"
+    fi
+
+    # Get the date of the first commit on this branch
+    date_prefix=""
+    merge_base=$(git merge-base HEAD "$main_branch" 2>/dev/null || echo "")
+    if [[ -n "$merge_base" ]]; then
+        # Get date of first commit after merge base
+        date_prefix=$(git log --format=%cs "${merge_base}..HEAD" 2>/dev/null | tail -1)
+    fi
+
+    # Fallback to current date if we couldn't determine branch creation date
+    if [[ -z "$date_prefix" ]]; then
+        date_prefix=$(date +%Y-%m-%d)
+    fi
+
+    # Build filename
+    log_file="$VIBE_DIR/${date_prefix}_${branch_safe}.md"
+fi
 
 # Create vibe directory if it doesn't exist
 mkdir -p "$VIBE_DIR"
